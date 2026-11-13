@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Legit Earnings</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;font-family:system-ui}body{margin:0;background:#f0f2f5;color:#111}
+.top{background:#0f7a3d;color:#fff;padding:20px;text-align:center}
+.card{background:#fff;margin:12px;padding:16px;border-radius:12px;box-shadow:0 1px 5px rgba(0,0,0,.08)}
+input,select,button{width:100%;padding:12px;margin:6px 0;border-radius:8px;border:1px solid #ddd;font-size:15px}
+button{background:#0f7a3d;color:#fff;border:none;font-weight:700;cursor:pointer}
+button.secondary{background:#eee;color:#111}
+.balance{font-size:32px;font-weight:800;text-align:center}
+.task{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;padding:10px 0}
+.task button{width:auto;padding:8px 14px}
+.hidden{display:none}.small{font-size:13px;color:#666;text-align:center}
+</style>
+</head>
+<body>
+<div class="top"><h1>💰 Legit Earnings</h1><p>Earn by completing simple tasks</p></div>
+
+<div id="auth" class="card">
+<h2>Login / Sign Up</h2>
+<input id="email" type="email" placeholder="Email">
+<input id="password" type="password" placeholder="Password">
+<button onclick="handleAuth('signup')">Create Account</button>
+<button class="secondary" onclick="handleAuth('login')">Login</button>
+<p class="small" id="authMsg"></p>
+</div>
+
+<div id="app" class="hidden">
+<div class="card"><p style="text-align:center;margin:0">Your Balance</p><div class="balance" id="balance">₦0</div><p class="small" id="userEmail"></p><button class="secondary" onclick="logout()">Logout</button></div>
+
+<div class="card"><h3>Available Tasks</h3><div id="tasks">Loading...</div></div>
+
+<div class="card"><h3>Withdraw - Min ₦5,000</h3>
+<select id="method"><option>Opay</option><option>Palmpay</option><option>Bank Transfer</option><option>Moniepoint</option></select>
+<input id="accountName" placeholder="Account Name">
+<input id="accountNumber" placeholder="Account Number / Opay Number">
+<input id="bankName" placeholder="Bank Name (e.g. Opay, GTBank)">
+<input id="amount" type="number" placeholder="Amount - Min 5000">
+<button onclick="withdraw()">Request Withdrawal</button>
+<p class="small" id="withdrawMsg"></p>
+<h4>My Withdrawals</h4><div id="myWithdrawals"></div>
+</div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://gxtuslxqjfwyednfgvmd.supabase.co";
+const SUPABASE_KEY = "sb_publishable_48d6Yj4hbCorqrIUxYn0aw_w7Wvt9eV";
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let currentUser=null, currentBalance=0;
+
+async function handleAuth(mode){
+  const email=document.getElementById('email').value;
+  const password=document.getElementById('password').value;
+  if(!email||!password) return document.getElementById('authMsg').innerText="Enter email and password";
+  let res;
+  if(mode==='signup'){ res=await supabaseClient.auth.signUp({email,password}); }
+  else { res=await supabaseClient.auth.signInWithPassword({email,password}); }
+  if(res.error) return document.getElementById('authMsg').innerText=res.error.message;
+  if(mode==='signup' && res.data.user){
+    await supabaseClient.from('profiles').insert([{id:res.data.user.id,email:email,balance:0}]);
+  }
+  document.getElementById('authMsg').innerText="Success! Loading...";
+  setTimeout(checkUser,800);
+}
+async function checkUser(){
+  const {data}=await supabaseClient.auth.getUser();
+  if(data.user){ currentUser=data.user; document.getElementById('auth').classList.add('hidden'); document.getElementById('app').classList.remove('hidden'); document.getElementById('userEmail').innerText=data.user.email; loadData(); }
+}
+async function loadData(){
+  let {data:profile}=await supabaseClient.from('profiles').select('*').eq('id',currentUser.id).single();
+  if(!profile){ await supabaseClient.from('profiles').insert([{id:currentUser.id,email:currentUser.email,balance:0}]); profile={balance:0}; }
+  currentBalance=profile.balance||0; document.getElementById('balance').innerText="₦"+currentBalance.toLocaleString();
+  let {data:tasks}=await supabaseClient.from('tasks').select('*').eq('is_active',true);
+  let html="";
+  (tasks||[]).forEach(t=>{ html+=`<div class="task"><div><b>${t.title}</b><br><span class="small">${t.description||''}</span></div><button onclick="completeTask(${t.reward})">Earn ₦${t.reward}</button></div>`; });
+  document.getElementById('tasks').innerHTML=html||"No tasks yet";
+  let {data:wds}=await supabaseClient.from('withdrawals').select('*').eq('user_id',currentUser.id).order('created_at',{ascending:false});
+  let wh=""; (wds||[]).forEach(w=>{ wh+=`<p>₦${w.amount} - ${w.method} - <b>${w.status}</b></p>`; });
+  document.getElementById('myWithdrawals').innerHTML=wh||"No withdrawals yet";
+}
+async function completeTask(reward){
+  currentBalance+=reward;
+  await supabaseClient.from('profiles').update({balance:currentBalance}).eq('id',currentUser.id);
+  document.getElementById('balance').innerText="₦"+currentBalance.toLocaleString();
+  alert("You earned ₦"+reward+"!");
+}
+async function withdraw(){
+  const amount=Number(document.getElementById('amount').value);
+  const method=document.getElementById('method').value;
+  const name=document.getElementById('accountName').value;
+  const num=document.getElementById('accountNumber').value;
+  const bank=document.getElementById('bankName').value;
+  if(amount<5000) return document.getElementById('withdrawMsg').innerText="Minimum is ₦5,000";
+  if(amount>currentBalance) return document.getElementById('withdrawMsg').innerText="Insufficient balance";
+  if(!name||!num||!bank) return document.getElementById('withdrawMsg').innerText="Fill all account details";
+  const {error}=await supabaseClient.from('withdrawals').insert([{user_id:currentUser.id,amount:amount,method:method+" | "+bank+" | "+name+" | "+num,status:'pending'}]);
+  if(error) return document.getElementById('withdrawMsg').innerText=error.message;
+  currentBalance-=amount;
+  await supabaseClient.from('profiles').update({balance:currentBalance}).eq('id',currentUser.id);
+  document.getElementById('withdrawMsg').innerText="Withdrawal requested! We will pay you soon.";
+  loadData();
+}
+async function logout(){ await supabaseClient.auth.signOut(); location.reload(); }
+checkUser();
+</script>
+</body>
+</html>
